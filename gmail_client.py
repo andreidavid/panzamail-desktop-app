@@ -3,15 +3,9 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-
 from googleapiclient.errors import HttpError
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 import base64
-
-from googleapiclient.errors import HttpError
-from email.mime.multipart import MIMEMultipart
-import base64
+import mailbox
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
@@ -28,42 +22,40 @@ def get_sent_emails(service, num_emails=5):
         messages = results.get("messages", [])
 
         # Create an mbox file to store the emails
-        with open("sent_emails.mbox", "w") as mbox_file:
+        mbox_file = mailbox.mbox("sent_emails.mbox")
+        mbox_file.lock()
+
+        for message in messages:
             subjects = []
-            for message in messages:
-                # Fetch the email message by ID
-                msg = (
-                    service.users()
-                    .messages()
-                    .get(userId="me", id=message["id"], format="raw")
-                    .execute()
-                )
+            # Fetch the email message by ID
+            msg = (
+                service.users()
+                .messages()
+                .get(userId="me", id=message["id"], format="raw")
+                .execute()
+            )
 
-                # Decode the raw message data
-                msg_str = base64.urlsafe_b64decode(msg["raw"].encode("ASCII"))
+            # Decode the raw message data
+            msg_raw = base64.urlsafe_b64decode(msg["raw"].encode("ASCII"))
 
-                # Decode the raw message data
-                msg_bytes = base64.urlsafe_b64decode(msg["raw"].encode("ASCII"))
+            # Convert the raw message bytes to a string
+            msg_str = msg_raw.decode("utf-8")
 
-                # Parse the email message
-                mime_msg = MIMEMultipart()
-                mime_msg.set_payload(msg_str)
+            # Create an email message object from the raw data
+            email_message = mailbox.mboxMessage(msg_str)
+            subject = email_message["subject"]
+            subjects.append(subject)
+            print(f"Subject: {subject}")
+            # Add the email message to the mbox file
+            mbox_file.add(email_message)
 
-                # Write the email to the mbox file
-                mbox_file.write(mime_msg.as_string(unixfrom=True))
-                mbox_file.write("\n")
+        mbox_file.flush()
+        mbox_file.unlock()
+        mbox_file.close()
 
-                # Extract the subject from the raw message data
-                subject = "No Subject"
-                for line in msg_bytes.decode("utf-8").split("\r\n"):
-                    if line.startswith("Subject:"):
-                        subject = line[9:].strip()
-                        break
-                subjects.append(subject)
-
-        # print(f"Successfully downloaded {len(messages)} sent emails.")
-        # return len(messages)
+        print(f"Successfully downloaded {len(messages)} sent emails.")
         return subjects
+
     except HttpError as error:
         print(f"An error occurred: {error}")
 
